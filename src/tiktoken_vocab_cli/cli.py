@@ -2,8 +2,9 @@ import argparse
 import csv
 import json
 import re
+import select
 import sys
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, NamedTuple, Tuple
 
 try:
     import tiktoken
@@ -409,56 +410,276 @@ def prompt_int(prompt: str, current: int | None) -> int | None:
 
 
 def prompt_bool(prompt: str, current: bool) -> bool:
-    default = "y" if current else "n"
-    while True:
-        raw = input(f"{prompt} [y/n] (default {default}): ").strip().lower()
-        if not raw:
-            return current
-        if raw in {"y", "yes"}:
-            return True
-        if raw in {"n", "no"}:
-            return False
-        print("Please enter 'y' or 'n'.")
+    options = [
+        MenuOption("true", "Yes", "y"),
+        MenuOption("false", "No", "n"),
+    ]
+    choice = select_menu_option(
+        f"{prompt} (current: {bool_label(current)})",
+        options,
+        default_value="true" if current else "false",
+        instructions="Use ↑/↓ or listed keys. Enter keeps the highlighted choice.",
+    )
+    return choice == "true"
 
 
 def prompt_length_by(current: str) -> str:
-    while True:
-        raw = input(f"Length basis (1=chars, 2=bytes) [current: {current}]: ").strip()
-        if not raw:
-            return current
-        if raw == "1":
-            return "chars"
-        if raw == "2":
-            return "bytes"
-        print("Please enter 1 or 2.")
+    options = [
+        MenuOption("chars", "Characters (decoded text)", "1", "Length is measured after decoding."),
+        MenuOption("bytes", "Bytes (raw token bytes)", "2", "Length counts the raw byte sequence."),
+    ]
+    default = current if current in {"chars", "bytes"} else "chars"
+    return select_menu_option(
+        f"Length basis (current: {default})",
+        options,
+        default_value=default,
+    )
 
 
 def prompt_sort_by(current: str) -> str:
-    sort_map = {"1": "id", "2": "len", "3": "token"}
-    while True:
-        raw = input(f"Sort key (1=id, 2=len, 3=token) [current: {current}]: ").strip()
-        if not raw:
-            return current
-        if raw in sort_map:
-            return sort_map[raw]
-        print("Please enter 1, 2, or 3.")
+    options = [
+        MenuOption("id", "Token id", "1"),
+        MenuOption("len", "Token length", "2"),
+        MenuOption("token", "Token string", "3"),
+    ]
+    default = current if current in {"id", "len", "token"} else "id"
+    return select_menu_option(
+        f"Sort key (current: {default})",
+        options,
+        default_value=default,
+    )
 
 
 def prompt_decode_errors(current: str) -> str:
-    options = {"1": "replace", "2": "ignore", "3": "strict"}
-    while True:
-        raw = input(
-            f"Decode error handling (1=replace, 2=ignore, 3=strict) [current: {current}]: "
-        ).strip()
-        if not raw:
-            return current
-        if raw in options:
-            return options[raw]
-        print("Please enter 1, 2, or 3.")
+    options = [
+        MenuOption("replace", "Replace (�) invalid bytes", "1"),
+        MenuOption("ignore", "Ignore invalid bytes", "2"),
+        MenuOption("strict", "Strict (raise errors)", "3"),
+    ]
+    default = current if current in {"replace", "ignore", "strict"} else "replace"
+    return select_menu_option(
+        f"Decode error handling (current: {default})",
+        options,
+        default_value=default,
+    )
 
 
 def bool_label(value: bool) -> str:
     return "yes" if value else "no"
+
+
+class MenuOption(NamedTuple):
+    value: str
+    label: str
+    hotkey: str | None = None
+    hint: str | None = None
+
+
+def _supports_key_capture() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _read_keypress() -> str | None:
+    if not _supports_key_capture():
+        return None
+
+    try:
+        import termios  # type: ignore[attr-defined]
+        import tty  # type: ignore[attr-defined]
+    except ImportError:
+        try:
+            import msvcrt  # type: ignore[attr-defined]
+        except ImportError:
+            return None
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):
+            ch += msvcrt.getwch()
+        return ch
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            try:
+                if select.select([sys.stdin], [], [], 0.02)[0]:
+                    ch += sys.stdin.read(1)
+                    if select.select([sys.stdin], [], [], 0.002)[0]:
+                        ch += sys.stdin.read(1)
+            except (OSError, ValueError):
+                pass
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _normalize_keypress(raw: str) -> str:
+    mapping = {
+        "\x1b[A": "UP",
+        "\x1b[B": "DOWN",
+        "\x1b[C": "RIGHT",
+        "\x1b[D": "LEFT",
+        "\x1bOA": "UP",
+        "\x1bOB": "DOWN",
+        "\x1bOC": "RIGHT",
+        "\x1bOD": "LEFT",
+        "\x00H": "UP",
+        "\xe0H": "UP",
+        "\x00P": "DOWN",
+        "\xe0P": "DOWN",
+        "\x00M": "RIGHT",
+        "\xe0M": "RIGHT",
+        "\x00K": "LEFT",
+        "\xe0K": "LEFT",
+        "\r": "ENTER",
+        "\n": "ENTER",
+        "\x03": "CTRL_C",
+        "\x04": "CTRL_D",
+        "\x7f": "BACKSPACE",
+        "\x1b": "ESC",
+    }
+    return mapping.get(raw, raw)
+
+
+def _match_option_by_key(key: str, options: List[MenuOption]) -> int | None:
+    lowered = key.lower()
+    for idx, opt in enumerate(options):
+        candidates = [opt.value.lower()]
+        if opt.hotkey:
+            candidates.append(opt.hotkey.lower())
+        if lowered in candidates:
+            return idx
+    return None
+
+
+def _render_interactive_menu(
+    prompt: str,
+    options: List[MenuOption],
+    highlight_idx: int,
+    show_hints: bool,
+    instructions: str,
+    rendered_lines: int,
+) -> int:
+    lines = [prompt]
+    if instructions:
+        lines.append(instructions)
+    for idx, opt in enumerate(options):
+        pointer = ">" if idx == highlight_idx else " "
+        hotkey = f"[{opt.hotkey}] " if opt.hotkey else ""
+        lines.append(f"{pointer} {hotkey}{opt.label}")
+        if show_hints and idx == highlight_idx and opt.hint:
+            lines.append(f"    {opt.hint}")
+
+    if rendered_lines:
+        sys.stdout.write(f"\x1b[{rendered_lines}F")
+        sys.stdout.write("\x1b[J")
+    sys.stdout.write("\n".join(lines))
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return len(lines)
+
+
+def select_menu_option(
+    prompt: str,
+    options: List[MenuOption],
+    *,
+    default_value: str | None = None,
+    instructions: str | None = None,
+) -> str:
+    if not options:
+        raise ValueError("options list cannot be empty")
+
+    instructions = (
+        instructions
+        or "Use ↑/↓ to navigate, Enter to select, listed hotkeys to jump, ? to toggle hints."
+    )
+
+    highlight_idx = 0
+    if default_value is not None:
+        for idx, opt in enumerate(options):
+            if opt.value == default_value:
+                highlight_idx = idx
+                break
+
+    def fallback() -> str:
+        print(prompt)
+        if instructions:
+            print(instructions)
+        for opt in options:
+            hotkey = f"[{opt.hotkey}] " if opt.hotkey else ""
+            print(f"  {hotkey}{opt.label}")
+        while True:
+            raw = input("Choice: ").strip()
+            if not raw and default_value is not None:
+                return default_value
+            match = _match_option_by_key(raw, options)
+            if match is not None:
+                return options[match].value
+            print("Please select one of the listed options.")
+
+    if not _supports_key_capture():
+        return fallback()
+
+    rendered_lines = 0
+    show_hints = True
+    try:
+        sys.stdout.write("\x1b[?25l")
+    except Exception:
+        pass
+
+    try:
+        rendered_lines = _render_interactive_menu(
+            prompt, options, highlight_idx, show_hints, instructions, rendered_lines
+        )
+        while True:
+            raw = _read_keypress()
+            if raw is None:
+                return fallback()
+            key = _normalize_keypress(raw)
+            if key == "CTRL_C":
+                raise KeyboardInterrupt
+            if key == "ESC":
+                return default_value if default_value is not None else options[highlight_idx].value
+            if key == "UP":
+                highlight_idx = (highlight_idx - 1) % len(options)
+                rendered_lines = _render_interactive_menu(
+                    prompt, options, highlight_idx, show_hints, instructions, rendered_lines
+                )
+                continue
+            if key == "DOWN":
+                highlight_idx = (highlight_idx + 1) % len(options)
+                rendered_lines = _render_interactive_menu(
+                    prompt, options, highlight_idx, show_hints, instructions, rendered_lines
+                )
+                continue
+            if key in {"?", "h", "H"}:
+                show_hints = not show_hints
+                rendered_lines = _render_interactive_menu(
+                    prompt, options, highlight_idx, show_hints, instructions, rendered_lines
+                )
+                continue
+            if key == "ENTER":
+                sys.stdout.write("\x1b[J")
+                sys.stdout.write("\n")
+                return options[highlight_idx].value
+
+            match = _match_option_by_key(key, options)
+            if match is not None:
+                highlight_idx = match
+                rendered_lines = _render_interactive_menu(
+                    prompt, options, highlight_idx, show_hints, instructions, rendered_lines
+                )
+                sys.stdout.write("\x1b[J")
+                sys.stdout.write("\n")
+                return options[highlight_idx].value
+    finally:
+        try:
+            sys.stdout.write("\x1b[?25h")
+        except Exception:
+            pass
+
+    return fallback()
 
 
 def run_interactive(
@@ -469,6 +690,45 @@ def run_interactive(
 
     if config.get("repeat_min") is None:
         config["repeat_min"] = 2
+
+    menu_options = [
+        MenuOption(
+            "1", "Configure model & encoding", "1", "Set model/encoding and toggle special tokens."
+        ),
+        MenuOption(
+            "2", "Configure text filters", "2", "Apply regex, prefix/suffix, and substring filters."
+        ),
+        MenuOption(
+            "3",
+            "Configure printable & decoding options",
+            "3",
+            "Control printable filter and decode behaviour.",
+        ),
+        MenuOption("4", "Configure length & ID filters", "4", "Limit token length or id ranges."),
+        MenuOption(
+            "5", "Configure byte-level filters", "5", "Filter based on the hex representation."
+        ),
+        MenuOption(
+            "6", "Configure wrapping filters", "6", "Match tokens enclosed by literal wrappers."
+        ),
+        MenuOption(
+            "7",
+            "Configure repetition filters",
+            "7",
+            "Match repeated characters or non-word sequences.",
+        ),
+        MenuOption(
+            "8", "Configure output options", "8", "Adjust limit, sorting, and output formats."
+        ),
+        MenuOption(
+            "9", "Run query with current settings", "9", "Execute the query and show results."
+        ),
+        MenuOption(
+            "0", "Reset all settings to defaults", "0", "Restore parser defaults from argparse."
+        ),
+        MenuOption("x", "Exit interactive mode", "x", "Close the menu and return to the shell."),
+    ]
+    selected_choice = "1"
 
     while True:
         print("\n=== TikToken Vocabulary Explorer ===")
@@ -488,22 +748,13 @@ def run_interactive(
         print(
             f" Output: sort by {config.get('sort_by', 'id')} ({'desc' if config.get('desc') else 'asc'}), limit {config.get('limit') or '-'}"
         )
-        print(" Options:")
-        print("  1) Configure model & encoding")
-        print("  2) Configure text filters")
-        print("  3) Configure printable & decoding options")
-        print("  4) Configure length & ID filters")
-        print("  5) Configure byte-level filters")
-        print("  6) Configure wrapping filters")
-        print("  7) Configure repetition filters")
-        print("  8) Configure output options")
-        print("  9) Run query with current settings")
-        print("  0) Reset all settings to defaults")
-        print("  x) Exit")
 
-        choice = input("Select an option: ").strip().lower()
-        if not choice:
-            continue
+        choice = select_menu_option(
+            "Choose an action:",
+            menu_options,
+            default_value=selected_choice,
+        )
+        selected_choice = choice
 
         if choice == "1":
             config["model"] = prompt_str("Model name", config.get("model"))
@@ -613,6 +864,7 @@ def run_interactive(
         elif choice == "0":
             config = dict(vars(parser.parse_args([])))
             config["repeat_min"] = config.get("repeat_min", 2) or 2
+            selected_choice = "1"
         elif choice == "x":
             print("Exiting interactive mode.")
             return
