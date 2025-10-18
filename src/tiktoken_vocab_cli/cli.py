@@ -9,8 +9,7 @@ try:
     import tiktoken
 except Exception:
     sys.stderr.write(
-        "Error: tiktoken is required but not installed.\n"
-        "Install with: pip install tiktoken\n"
+        "Error: tiktoken is required but not installed.\nInstall with: pip install tiktoken\n"
     )
     sys.exit(1)
 
@@ -24,7 +23,9 @@ def resolve_encoding_name(model: str | None, encoding: str | None) -> str:
             enc = tiktoken.encoding_for_model(model)
             return enc.name
         except KeyError:
-            sys.stderr.write(f"Warning: unknown model '{model}'. Falling back to encoding '{encoding or 'cl100k_base'}'.\n")
+            sys.stderr.write(
+                f"Warning: unknown model '{model}'. Falling back to encoding '{encoding or 'cl100k_base'}'.\n"
+            )
     return encoding or "cl100k_base"
 
 
@@ -40,7 +41,7 @@ def iter_vocab(encoding_name: str, include_special: bool) -> Iterable[Tuple[int,
 
 def is_printable(s: str, allow_whitespace: bool) -> bool:
     if allow_whitespace:
-        return all((ch.isprintable() or ch in "\t\n\r ")) for ch in s)
+        return all((ch.isprintable() or ch in "\t\n\r ") for ch in s)
     return s.isprintable()
 
 
@@ -73,7 +74,9 @@ def char_class_from_literals(chars: str) -> str:
     return f"[{escaped}]"
 
 
-def build_wrap_pattern(left: str, right: str, inner_regex: str | None, ignore_case: bool, greedy: bool) -> re.Pattern:
+def build_wrap_pattern(
+    left: str, right: str, inner_regex: str | None, ignore_case: bool, greedy: bool
+) -> re.Pattern:
     L = re.escape(left)
     R = re.escape(right)
     inner = inner_regex if inner_regex is not None else (".+" if greedy else ".+?")
@@ -93,7 +96,6 @@ def matches_filters(
     repeat_nonword_re: re.Pattern | None,
     repeat_chars_re: re.Pattern | None,
 ) -> bool:
-
     # Regex on decoded string
     if args.regex:
         if not regex_obj.search(token_str):
@@ -159,78 +161,29 @@ def sort_key(row: Dict[str, object], key: str):
     return 0
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Query tiktoken vocabulary with flexible filters.")
-    # Model/encoding
-    p.add_argument("--model", help="Model name to resolve encoding (e.g., gpt-4o).")
-    p.add_argument("--encoding", help="Encoding name (e.g., cl100k_base). Defaults to model-derived or cl100k_base.")
-    p.add_argument("--include-special", action="store_true", help="Include special tokens in results.")
-
-    # Text filters
-    p.add_argument("--regex", help="Regex applied to decoded token string.")
-    p.add_argument("--ignore-case", action="store_true", help="Regex ignore case.")
-    p.add_argument("--startswith", help="String prefix (decoded).")
-    p.add_argument("--endswith", help="String suffix (decoded).")
-    p.add_argument("--contains", help="Substring containment (decoded).")
-
-    # Encapsulation / wrapping filters
-    p.add_argument("--wrap-left", dest="wrap_left", help="Literal left wrapper, e.g., '<-|'")
-    p.add_argument("--wrap-right", dest="wrap_right", help="Literal right wrapper, e.g., '|->'")
-    p.add_argument("--wrap-inner-regex", dest="wrap_inner_regex",
-                   help="Regex for inner content between left/right (default: '.+?' non-greedy).")
-    p.add_argument("--wrap-greedy", action="store_true", help="Use greedy inner match (default non-greedy).")
-
-    # Repeating nonstandard characters
-    p.add_argument("--repeat-nonword-min", type=int,
-                   help="Match tokens containing \u2265N consecutive non-alnum/underscore/non-space characters.")
-    p.add_argument("--repeat-chars", help="Literal set of characters to consider for repetition, e.g., '<|-'")
-    p.add_argument("--repeat-min", type=int, default=2, help="Minimum run length for --repeat-chars (default: 2).")
-
-    # Byte-level hex filters
-    p.add_argument("--bytes-startswith", dest="bytes_startswith", help="Hex prefix, e.g., 'e2 96 81'.")
-    p.add_argument("--bytes-endswith", dest="bytes_endswith", help="Hex suffix.")
-    p.add_argument("--bytes-contains", dest="bytes_contains", help="Hex substring anywhere.")
-
-    # Length & ID filters
-    p.add_argument("--min-len", type=int, help="Minimum token length (see --length-by).")
-    p.add_argument("--max-len", type=int, help="Maximum token length (see --length-by).")
-    p.add_argument("--length-by", choices=["chars", "bytes"], default="chars", help="Count length by characters or bytes.")
-    p.add_argument("--min-id", type=int, help="Minimum token id.")
-    p.add_argument("--max-id", type=int, help="Maximum token id.")
-
-    # Decoding / printable
-    p.add_argument("--decode-errors", choices=["replace", "ignore", "strict"], default="replace",
-                   help="How to handle invalid UTF-8 when decoding tokens (default: replace).")
-    p.add_argument("--printable", action="store_true", help="Only include tokens whose decoded form is printable.")
-    p.add_argument("--allow-whitespace", action="store_true", help="When --printable, allow whitespace characters too.")
-
-    # Output / formatting
-    p.add_argument("--limit", type=int, help="Limit number of rows displayed (applied after filtering & sorting).")
-    p.add_argument("--sort-by", choices=["id", "len", "token"], default="id", help="Sort results.")
-    p.add_argument("--desc", action="store_true", help="Sort descending.")
-    p.add_argument("--csv", metavar="PATH", help="Write results to CSV at PATH.")
-    p.add_argument("--no-header", action="store_true", help="Do not print header row to stdout.")
-    p.add_argument("--show-bytes", action="store_true", help="Include token bytes as hex in output.")
-    p.add_argument("--show-repr", action="store_true", help="Include python-style escaped representation of token.")
-    p.add_argument("--json", action="store_true", help="Output results as a JSON array to stdout (suppresses table).")
-    p.add_argument("--jsonl", action="store_true", help="Output results as JSON Lines to stdout (suppresses table).")
-    p.add_argument("--pretty", action="store_true", help="Pretty-print JSON with indentation.")
-
-    return p
+def build_headers(args: argparse.Namespace) -> List[str]:
+    headers = ["token_id", "length", "token_str"]
+    if args.show_bytes:
+        headers.append("token_bytes_hex")
+    if args.show_repr:
+        headers.append("token_repr")
+    return headers
 
 
-def main(argv: List[str] | None = None):
-    p = build_arg_parser()
-    args = p.parse_args(argv)
-
+def collect_rows(args: argparse.Namespace) -> List[Dict[str, object]]:
     encoding_name = resolve_encoding_name(args.model, args.encoding)
 
     regex_obj = build_regex(args.regex, args.ignore_case) if args.regex else None
 
     wrap_re = None
     if args.wrap_left is not None and args.wrap_right is not None:
-        wrap_re = build_wrap_pattern(args.wrap_left, args.wrap_right, args.wrap_inner_regex,
-                                     args.ignore_case, args.wrap_greedy)
+        wrap_re = build_wrap_pattern(
+            args.wrap_left,
+            args.wrap_right,
+            args.wrap_inner_regex,
+            args.ignore_case,
+            args.wrap_greedy,
+        )
 
     repeat_nonword_re = None
     if args.repeat_nonword_min:
@@ -259,7 +212,7 @@ def main(argv: List[str] | None = None):
             repeat_nonword_re=repeat_nonword_re,
             repeat_chars_re=repeat_chars_re,
         ):
-            row = {
+            row: Dict[str, object] = {
                 "token_id": token_id,
                 "length": token_len(token_bytes, args.length_by, args.decode_errors),
                 "token_str": token_str,
@@ -275,13 +228,12 @@ def main(argv: List[str] | None = None):
     if args.limit is not None:
         rows = rows[: args.limit]
 
-    headers = ["token_id", "length", "token_str"]
-    if args.show_bytes:
-        headers.append("token_bytes_hex")
-    if args.show_repr:
-        headers.append("token_repr")
+    return rows
 
-    # CSV output (optional)
+
+def output_results(args: argparse.Namespace, rows: List[Dict[str, object]]) -> None:
+    headers = build_headers(args)
+
     if args.csv:
         with open(args.csv, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=headers)
@@ -289,7 +241,6 @@ def main(argv: List[str] | None = None):
             writer.writerows(rows)
         print(f"Wrote {len(rows)} rows to {args.csv}", file=sys.stderr)
 
-    # JSON / JSONL output modes (suppress table)
     if args.json or args.jsonl:
         if args.jsonl:
             for r in rows:
@@ -301,12 +252,384 @@ def main(argv: List[str] | None = None):
                 print(json.dumps(rows, ensure_ascii=False))
         return
 
-    # Stdout table (TSV-like)
     out = sys.stdout
     if not args.no_header:
         out.write("\t".join(headers) + "\n")
     for r in rows:
         out.write("\t".join(str(r.get(h, "")) for h in headers) + "\n")
+
+
+def run_cli(args: argparse.Namespace) -> None:
+    rows = collect_rows(args)
+    output_results(args, rows)
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Query tiktoken vocabulary with flexible filters.")
+    p.add_argument(
+        "--interactive", action="store_true", help="Launch interactive menu instead of using flags."
+    )
+    # Model/encoding
+    p.add_argument("--model", help="Model name to resolve encoding (e.g., gpt-4o).")
+    p.add_argument(
+        "--encoding",
+        help="Encoding name (e.g., cl100k_base). Defaults to model-derived or cl100k_base.",
+    )
+    p.add_argument(
+        "--include-special", action="store_true", help="Include special tokens in results."
+    )
+
+    # Text filters
+    p.add_argument("--regex", help="Regex applied to decoded token string.")
+    p.add_argument("--ignore-case", action="store_true", help="Regex ignore case.")
+    p.add_argument("--startswith", help="String prefix (decoded).")
+    p.add_argument("--endswith", help="String suffix (decoded).")
+    p.add_argument("--contains", help="Substring containment (decoded).")
+
+    # Encapsulation / wrapping filters
+    p.add_argument("--wrap-left", dest="wrap_left", help="Literal left wrapper, e.g., '<-|'")
+    p.add_argument("--wrap-right", dest="wrap_right", help="Literal right wrapper, e.g., '|->'")
+    p.add_argument(
+        "--wrap-inner-regex",
+        dest="wrap_inner_regex",
+        help="Regex for inner content between left/right (default: '.+?' non-greedy).",
+    )
+    p.add_argument(
+        "--wrap-greedy", action="store_true", help="Use greedy inner match (default non-greedy)."
+    )
+
+    # Repeating nonstandard characters
+    p.add_argument(
+        "--repeat-nonword-min",
+        type=int,
+        help="Match tokens containing \u2265N consecutive non-alnum/underscore/non-space characters.",
+    )
+    p.add_argument(
+        "--repeat-chars", help="Literal set of characters to consider for repetition, e.g., '<|-'"
+    )
+    p.add_argument(
+        "--repeat-min",
+        type=int,
+        default=2,
+        help="Minimum run length for --repeat-chars (default: 2).",
+    )
+
+    # Byte-level hex filters
+    p.add_argument(
+        "--bytes-startswith", dest="bytes_startswith", help="Hex prefix, e.g., 'e2 96 81'."
+    )
+    p.add_argument("--bytes-endswith", dest="bytes_endswith", help="Hex suffix.")
+    p.add_argument("--bytes-contains", dest="bytes_contains", help="Hex substring anywhere.")
+
+    # Length & ID filters
+    p.add_argument("--min-len", type=int, help="Minimum token length (see --length-by).")
+    p.add_argument("--max-len", type=int, help="Maximum token length (see --length-by).")
+    p.add_argument(
+        "--length-by",
+        choices=["chars", "bytes"],
+        default="chars",
+        help="Count length by characters or bytes.",
+    )
+    p.add_argument("--min-id", type=int, help="Minimum token id.")
+    p.add_argument("--max-id", type=int, help="Maximum token id.")
+
+    # Decoding / printable
+    p.add_argument(
+        "--decode-errors",
+        choices=["replace", "ignore", "strict"],
+        default="replace",
+        help="How to handle invalid UTF-8 when decoding tokens (default: replace).",
+    )
+    p.add_argument(
+        "--printable",
+        action="store_true",
+        help="Only include tokens whose decoded form is printable.",
+    )
+    p.add_argument(
+        "--allow-whitespace",
+        action="store_true",
+        help="When --printable, allow whitespace characters too.",
+    )
+
+    # Output / formatting
+    p.add_argument(
+        "--limit",
+        type=int,
+        help="Limit number of rows displayed (applied after filtering & sorting).",
+    )
+    p.add_argument("--sort-by", choices=["id", "len", "token"], default="id", help="Sort results.")
+    p.add_argument("--desc", action="store_true", help="Sort descending.")
+    p.add_argument("--csv", metavar="PATH", help="Write results to CSV at PATH.")
+    p.add_argument("--no-header", action="store_true", help="Do not print header row to stdout.")
+    p.add_argument(
+        "--show-bytes", action="store_true", help="Include token bytes as hex in output."
+    )
+    p.add_argument(
+        "--show-repr",
+        action="store_true",
+        help="Include python-style escaped representation of token.",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as a JSON array to stdout (suppresses table).",
+    )
+    p.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="Output results as JSON Lines to stdout (suppresses table).",
+    )
+    p.add_argument("--pretty", action="store_true", help="Pretty-print JSON with indentation.")
+
+    return p
+
+
+def prompt_str(prompt: str, current: str | None) -> str | None:
+    default = f" [{current}]" if current else ""
+    raw = input(f"{prompt}{default} (Enter to keep, '-' to clear): ").strip()
+    if not raw:
+        return current
+    if raw == "-":
+        return None
+    return raw
+
+
+def prompt_int(prompt: str, current: int | None) -> int | None:
+    default = f" [{current}]" if current is not None else " [None]"
+    while True:
+        raw = input(f"{prompt}{default} (Enter to keep, '-' to clear): ").strip()
+        if not raw:
+            return current
+        if raw == "-":
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            print("Please enter an integer.")
+
+
+def prompt_bool(prompt: str, current: bool) -> bool:
+    default = "y" if current else "n"
+    while True:
+        raw = input(f"{prompt} [y/n] (default {default}): ").strip().lower()
+        if not raw:
+            return current
+        if raw in {"y", "yes"}:
+            return True
+        if raw in {"n", "no"}:
+            return False
+        print("Please enter 'y' or 'n'.")
+
+
+def prompt_length_by(current: str) -> str:
+    while True:
+        raw = input(f"Length basis (1=chars, 2=bytes) [current: {current}]: ").strip()
+        if not raw:
+            return current
+        if raw == "1":
+            return "chars"
+        if raw == "2":
+            return "bytes"
+        print("Please enter 1 or 2.")
+
+
+def prompt_sort_by(current: str) -> str:
+    sort_map = {"1": "id", "2": "len", "3": "token"}
+    while True:
+        raw = input(f"Sort key (1=id, 2=len, 3=token) [current: {current}]: ").strip()
+        if not raw:
+            return current
+        if raw in sort_map:
+            return sort_map[raw]
+        print("Please enter 1, 2, or 3.")
+
+
+def prompt_decode_errors(current: str) -> str:
+    options = {"1": "replace", "2": "ignore", "3": "strict"}
+    while True:
+        raw = input(
+            f"Decode error handling (1=replace, 2=ignore, 3=strict) [current: {current}]: "
+        ).strip()
+        if not raw:
+            return current
+        if raw in options:
+            return options[raw]
+        print("Please enter 1, 2, or 3.")
+
+
+def bool_label(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def run_interactive(
+    parser: argparse.ArgumentParser, initial_args: argparse.Namespace | None = None
+) -> None:
+    base_ns = initial_args or parser.parse_args([])
+    config = dict(vars(base_ns))
+
+    if config.get("repeat_min") is None:
+        config["repeat_min"] = 2
+
+    while True:
+        print("\n=== TikToken Vocabulary Explorer ===")
+        print(
+            f" Model: {config.get('model') or '-'} | Encoding: {config.get('encoding') or 'auto'} | Include special: {bool_label(bool(config.get('include_special', False)))}"
+        )
+        regex_desc = config.get("regex") or "-"
+        print(
+            f" Regex: {regex_desc} | Ignore case: {bool_label(bool(config.get('ignore_case', False)))}"
+        )
+        print(
+            f" Printable only: {bool_label(bool(config.get('printable', False)))} | Allow whitespace: {bool_label(bool(config.get('allow_whitespace', False)))} | Decode errors: {config.get('decode_errors', 'replace')}"
+        )
+        print(
+            f" Length range: {config.get('min_len') or '-'} to {config.get('max_len') or '-'} ({config.get('length_by', 'chars')}) | ID range: {config.get('min_id') or '-'} to {config.get('max_id') or '-'}"
+        )
+        print(
+            f" Output: sort by {config.get('sort_by', 'id')} ({'desc' if config.get('desc') else 'asc'}), limit {config.get('limit') or '-'}"
+        )
+        print(" Options:")
+        print("  1) Configure model & encoding")
+        print("  2) Configure text filters")
+        print("  3) Configure printable & decoding options")
+        print("  4) Configure length & ID filters")
+        print("  5) Configure byte-level filters")
+        print("  6) Configure wrapping filters")
+        print("  7) Configure repetition filters")
+        print("  8) Configure output options")
+        print("  9) Run query with current settings")
+        print("  0) Reset all settings to defaults")
+        print("  x) Exit")
+
+        choice = input("Select an option: ").strip().lower()
+        if not choice:
+            continue
+
+        if choice == "1":
+            config["model"] = prompt_str("Model name", config.get("model"))
+            config["encoding"] = prompt_str("Encoding name", config.get("encoding"))
+            config["include_special"] = prompt_bool(
+                "Include special tokens?", bool(config.get("include_special", False))
+            )
+        elif choice == "2":
+            config["regex"] = prompt_str("Regex pattern", config.get("regex"))
+            if config.get("regex"):
+                config["ignore_case"] = prompt_bool(
+                    "Ignore case for regex?", bool(config.get("ignore_case", False))
+                )
+            else:
+                config["ignore_case"] = False
+            config["startswith"] = prompt_str("Startswith text", config.get("startswith"))
+            config["endswith"] = prompt_str("Endswith text", config.get("endswith"))
+            config["contains"] = prompt_str("Contains text", config.get("contains"))
+        elif choice == "3":
+            config["printable"] = prompt_bool(
+                "Require printable tokens?",
+                bool(config.get("printable", False)),
+            )
+            if config["printable"]:
+                config["allow_whitespace"] = prompt_bool(
+                    "Allow whitespace characters?",
+                    bool(config.get("allow_whitespace", False)),
+                )
+            else:
+                config["allow_whitespace"] = bool(config.get("allow_whitespace", False))
+            config["decode_errors"] = prompt_decode_errors(config.get("decode_errors", "replace"))
+        elif choice == "4":
+            config["min_len"] = prompt_int("Minimum length", config.get("min_len"))
+            config["max_len"] = prompt_int("Maximum length", config.get("max_len"))
+            config["length_by"] = prompt_length_by(config.get("length_by", "chars"))
+            config["min_id"] = prompt_int("Minimum token ID", config.get("min_id"))
+            config["max_id"] = prompt_int("Maximum token ID", config.get("max_id"))
+        elif choice == "5":
+            config["bytes_startswith"] = prompt_str(
+                "Hex prefix (bytes startswith)", config.get("bytes_startswith")
+            )
+            config["bytes_endswith"] = prompt_str(
+                "Hex suffix (bytes endswith)", config.get("bytes_endswith")
+            )
+            config["bytes_contains"] = prompt_str(
+                "Hex substring (bytes contains)", config.get("bytes_contains")
+            )
+        elif choice == "6":
+            config["wrap_left"] = prompt_str("Wrap left literal", config.get("wrap_left"))
+            config["wrap_right"] = prompt_str("Wrap right literal", config.get("wrap_right"))
+            config["wrap_inner_regex"] = prompt_str(
+                "Inner wrap regex", config.get("wrap_inner_regex")
+            )
+            config["wrap_greedy"] = prompt_bool(
+                "Use greedy inner wrap match?",
+                bool(config.get("wrap_greedy", False)),
+            )
+        elif choice == "7":
+            config["repeat_nonword_min"] = prompt_int(
+                "Min consecutive non-word characters",
+                config.get("repeat_nonword_min"),
+            )
+            config["repeat_chars"] = prompt_str(
+                "Character set for repetition", config.get("repeat_chars")
+            )
+            if config["repeat_chars"]:
+                repeat_min = prompt_int("Minimum run length", config.get("repeat_min", 2))
+                config["repeat_min"] = repeat_min if repeat_min is not None else 2
+            else:
+                config["repeat_min"] = 2
+        elif choice == "8":
+            config["limit"] = prompt_int("Row limit", config.get("limit"))
+            config["sort_by"] = prompt_sort_by(config.get("sort_by", "id"))
+            config["desc"] = prompt_bool("Sort descending?", bool(config.get("desc", False)))
+            config["show_bytes"] = prompt_bool(
+                "Include bytes column?", bool(config.get("show_bytes", False))
+            )
+            config["show_repr"] = prompt_bool(
+                "Include repr column?", bool(config.get("show_repr", False))
+            )
+            config["csv"] = prompt_str("CSV output path", config.get("csv"))
+            config["json"] = prompt_bool("Output JSON array?", bool(config.get("json", False)))
+            if config["json"]:
+                config["pretty"] = prompt_bool(
+                    "Pretty print JSON?", bool(config.get("pretty", False))
+                )
+                config["jsonl"] = False
+            else:
+                config["jsonl"] = prompt_bool(
+                    "Output JSON Lines?", bool(config.get("jsonl", False))
+                )
+                if not config["jsonl"]:
+                    config["pretty"] = bool(config.get("pretty", False))
+            config["no_header"] = prompt_bool(
+                "Skip header row?", bool(config.get("no_header", False))
+            )
+        elif choice == "9":
+            run_args = dict(config)
+            run_args["interactive"] = False
+            try:
+                run_cli(argparse.Namespace(**run_args))
+            except KeyboardInterrupt:
+                print("\nQuery cancelled.")
+            except Exception as exc:
+                print(f"\nError running query: {exc}")
+            input("\nPress Enter to return to the menu...")
+        elif choice == "0":
+            config = dict(vars(parser.parse_args([])))
+            config["repeat_min"] = config.get("repeat_min", 2) or 2
+        elif choice == "x":
+            print("Exiting interactive mode.")
+            return
+        else:
+            print("Unrecognized option.")
+
+
+def main(argv: List[str] | None = None):
+    parser = build_arg_parser()
+    provided_args = list(argv) if argv is not None else sys.argv[1:]
+    args = parser.parse_args(provided_args)
+
+    if args.interactive or not provided_args:
+        run_interactive(parser, args if args.interactive else None)
+        return
+
+    run_cli(args)
 
 
 if __name__ == "__main__":
