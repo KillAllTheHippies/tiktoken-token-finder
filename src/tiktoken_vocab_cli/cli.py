@@ -481,6 +481,48 @@ def bool_label(value: bool) -> str:
     return "yes" if value else "no"
 
 
+def available_model_names() -> List[str]:
+    try:
+        return sorted(tiktoken.model.MODEL_TO_ENCODING.keys())  # type: ignore[attr-defined]
+    except Exception:
+        return []
+
+
+def available_encoding_names() -> List[str]:
+    try:
+        return sorted(tiktoken.list_encoding_names())
+    except Exception:
+        return []
+
+
+def choose_from_catalog(prompt: str, values: List[str], current: str | None) -> str | None:
+    if not values:
+        return prompt_str(prompt, current)
+
+    extras = [
+        MenuOption("__custom__", "Enter a custom value", "c"),
+        MenuOption("__clear__", "Clear value", "-", "Remove the current value."),
+        MenuOption("__back__", "Back (keep current)", "b"),
+    ]
+    options = extras + [MenuOption(v, v) for v in values]
+
+    default = current if current in values else "__back__"
+    choice = select_menu_option(
+        prompt,
+        options,
+        default_value=default,
+        instructions="Use ↑/↓ to browse known values or select action hotkeys above.",
+    )
+
+    if choice == "__custom__":
+        return prompt_str(prompt, current)
+    if choice == "__clear__":
+        return None
+    if choice == "__back__":
+        return current
+    return choice
+
+
 class MenuOption(NamedTuple):
     value: str
     label: str
@@ -825,8 +867,16 @@ def run_interactive(
         selected_choice = choice
 
         if choice == "1":
-            config["model"] = prompt_str("Model name", config.get("model"))
-            config["encoding"] = prompt_str("Encoding name", config.get("encoding"))
+            config["model"] = choose_from_catalog(
+                "Select a model (or choose an action):",
+                available_model_names(),
+                config.get("model"),
+            )
+            config["encoding"] = choose_from_catalog(
+                "Select an encoding (or choose an action):",
+                available_encoding_names(),
+                config.get("encoding"),
+            )
             include_special = prompt_bool(
                 "Include special tokens?", bool(config.get("include_special", False))
             )
