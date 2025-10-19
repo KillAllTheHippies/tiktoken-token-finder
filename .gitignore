@@ -24,6 +24,10 @@ dist/
 build/
 *.egg-info/
 
+# Project artifacts
+WARP.md
+tokenizer_output.csv
+
 # Editors/OS
 .idea/
 .vscode/

@@ -14,3 +14,10 @@ ignore = []
 known-first-party = ["tiktoken_vocab_cli"]
 combine-as-imports = true
 
+[dependency-groups]
+dev = [
+    "black>=24.0.0",
+    "pre-commit>=3.7.0",
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
