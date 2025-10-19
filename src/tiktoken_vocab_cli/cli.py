@@ -398,9 +398,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def prompt_str(prompt: str, current: str | None) -> str | None:
-    default = f" [{current}]" if current else ""
-    raw = input(f"{prompt}{default} (Enter to keep, '-' to clear): ").strip()
+def prompt_str(prompt: str, current: str | None, *, hint: str | None = None) -> str | None:
+    default = f" [{current}]" if current else " [none]"
+    message = f"{prompt}{default}"
+    if hint:
+        message += f"\n  Hint: {hint}"
+    raw = input(f"{message}\n  Enter to keep current, '-' to clear: ").strip()
     if not raw:
         return current
     if raw == "-":
@@ -408,10 +411,13 @@ def prompt_str(prompt: str, current: str | None) -> str | None:
     return raw
 
 
-def prompt_int(prompt: str, current: int | None) -> int | None:
-    default = f" [{current}]" if current is not None else " [None]"
+def prompt_int(prompt: str, current: int | None, *, hint: str | None = None) -> int | None:
+    default = f" [{current}]" if current is not None else " [none]"
     while True:
-        raw = input(f"{prompt}{default} (Enter to keep, '-' to clear): ").strip()
+        message = f"{prompt}{default}"
+        if hint:
+            message += f"\n  Hint: {hint}"
+        raw = input(f"{message}\n  Enter to keep current, '-' to clear: ").strip()
         if not raw:
             return current
         if raw == "-":
@@ -422,16 +428,18 @@ def prompt_int(prompt: str, current: int | None) -> int | None:
             print("Please enter an integer.")
 
 
-def prompt_bool(prompt: str, current: bool) -> bool:
+def prompt_bool(prompt: str, current: bool, *, hint: str | None = None) -> bool:
     options = [
         MenuOption("true", "Yes", "y"),
         MenuOption("false", "No", "n"),
     ]
+    base_instructions = "Use ↑/↓ or listed keys. Enter keeps the highlighted choice."
+    instructions = f"{hint}\n{base_instructions}" if hint else base_instructions
     choice = select_menu_option(
         f"{prompt} (current: {bool_label(current)})",
         options,
         default_value="true" if current else "false",
-        instructions="Use ↑/↓ or listed keys. Enter keeps the highlighted choice.",
+        instructions=instructions,
     )
     return choice == "true"
 
@@ -446,7 +454,9 @@ def prompt_length_by(current: str) -> str:
         f"Length basis (current: {default})",
         options,
         default_value=default,
-        instructions="Default measurement counts decoded characters.",
+        instructions=(
+            "Choose how lengths are measured. Default counts decoded characters; bytes counts raw token length."
+        ),
     )
 
 
@@ -461,7 +471,7 @@ def prompt_sort_by(current: str) -> str:
         f"Sort key (current: {default})",
         options,
         default_value=default,
-        instructions="Default ordering sorts by token id ascending.",
+        instructions=("Select the column used for sorting. Default sorts by token id ascending."),
     )
 
 
@@ -476,7 +486,9 @@ def prompt_decode_errors(current: str) -> str:
         f"Decode error handling (current: {default})",
         options,
         default_value=default,
-        instructions="Default strategy replaces undecodable bytes with the replacement character.",
+        instructions=(
+            "Choose how to handle invalid UTF-8 when decoding tokens. Default replace shows the replacement character (�)."
+        ),
     )
 
 
@@ -498,7 +510,9 @@ def available_encoding_names() -> List[str]:
         return []
 
 
-def choose_from_catalog(prompt: str, values: List[str], current: str | None) -> str | None:
+def choose_from_catalog(
+    prompt: str, values: List[str], current: str | None, *, hint: str | None = None
+) -> str | None:
     if not values:
         return prompt_str(prompt, current)
 
@@ -525,15 +539,18 @@ def choose_from_catalog(prompt: str, values: List[str], current: str | None) -> 
     options = extras + [MenuOption(v, v) for v in values]
 
     default = current if current in values else "__back__"
+    instructions = "Use ↑/↓ to browse known values or select action hotkeys above."
+    if hint:
+        instructions = f"{hint}\n{instructions}"
     choice = select_menu_option(
         prompt,
         options,
         default_value=default,
-        instructions="Use ↑/↓ to browse known values or select action hotkeys above.",
+        instructions=instructions,
     )
 
     if choice == "__custom__":
-        return prompt_str(prompt, current)
+        return prompt_str(prompt, current, hint=hint)
     if choice == "__clear__":
         return None
     if choice == "__back__":
@@ -912,112 +929,202 @@ def run_interactive(
                 "Select a model (default: none — encoding determines behaviour):",
                 available_model_names(),
                 config.get("model"),
+                hint="Model presets map to known OpenAI models and automatically choose an encoding.",
             )
             config["encoding"] = choose_from_catalog(
                 "Select an encoding (default: cl100k_base unless a model overrides it):",
                 available_encoding_names(),
                 config.get("encoding"),
+                hint="Encodings define the base vocabulary (e.g., cl100k_base, gpt2).",
             )
             include_special = prompt_bool(
                 "Include special tokens? (default: no)",
                 bool(config.get("include_special", False)),
+                hint="Adds entries from encoding._special_tokens such as `` and other control tokens.",
             )
             config["include_special"] = include_special
             if include_special:
                 config["special_only"] = prompt_bool(
                     "Show only special tokens? (default: no)",
                     bool(config.get("special_only", False)),
+                    hint="Filters results to special tokens exclusively, hiding mergeable ranks.",
                 )
             else:
                 config["special_only"] = False
         elif choice == "2":
-            config["regex"] = prompt_str("Regex pattern", config.get("regex"))
+            config["regex"] = prompt_str(
+                "Regex pattern",
+                config.get("regex"),
+                hint="Python-style regular expression matched against the decoded token string. Leave blank to disable.",
+            )
             if config.get("regex"):
                 config["ignore_case"] = prompt_bool(
-                    "Ignore case for regex?", bool(config.get("ignore_case", False))
+                    "Ignore case for regex?",
+                    bool(config.get("ignore_case", False)),
+                    hint="When enabled, applies re.IGNORECASE to the regex search.",
                 )
             else:
                 config["ignore_case"] = False
-            config["startswith"] = prompt_str("Startswith text", config.get("startswith"))
-            config["endswith"] = prompt_str("Endswith text", config.get("endswith"))
-            config["contains"] = prompt_str("Contains text", config.get("contains"))
+            config["startswith"] = prompt_str(
+                "Startswith text",
+                config.get("startswith"),
+                hint="Filters for tokens whose decoded form starts with this text (case sensitive).",
+            )
+            config["endswith"] = prompt_str(
+                "Endswith text",
+                config.get("endswith"),
+                hint="Filters for tokens whose decoded form ends with this text (case sensitive).",
+            )
+            config["contains"] = prompt_str(
+                "Contains text",
+                config.get("contains"),
+                hint="Filters for tokens whose decoded form contains this substring (case sensitive).",
+            )
         elif choice == "3":
             config["printable"] = prompt_bool(
                 "Require printable tokens?",
                 bool(config.get("printable", False)),
+                hint="Filters out tokens whose decoded form contains control characters or unprintable glyphs.",
             )
             if config["printable"]:
                 config["allow_whitespace"] = prompt_bool(
                     "Allow whitespace characters?",
                     bool(config.get("allow_whitespace", False)),
+                    hint="When enabled, tabs/newlines/spaces are treated as printable.",
                 )
             else:
                 config["allow_whitespace"] = bool(config.get("allow_whitespace", False))
             config["decode_errors"] = prompt_decode_errors(config.get("decode_errors", "replace"))
         elif choice == "4":
-            config["min_len"] = prompt_int("Minimum length", config.get("min_len"))
-            config["max_len"] = prompt_int("Maximum length", config.get("max_len"))
+            config["min_len"] = prompt_int(
+                "Minimum length",
+                config.get("min_len"),
+                hint="Lower bound on token length using the selected measurement. Leave blank for no minimum.",
+            )
+            config["max_len"] = prompt_int(
+                "Maximum length",
+                config.get("max_len"),
+                hint="Upper bound on token length using the selected measurement. Leave blank for no maximum.",
+            )
             config["length_by"] = prompt_length_by(config.get("length_by", "chars"))
-            config["min_id"] = prompt_int("Minimum token ID", config.get("min_id"))
-            config["max_id"] = prompt_int("Maximum token ID", config.get("max_id"))
+            config["min_id"] = prompt_int(
+                "Minimum token ID",
+                config.get("min_id"),
+                hint="Smallest token id to include. Leave blank to start from 0.",
+            )
+            config["max_id"] = prompt_int(
+                "Maximum token ID",
+                config.get("max_id"),
+                hint="Largest token id to include. Leave blank for no upper bound.",
+            )
         elif choice == "5":
             config["bytes_startswith"] = prompt_str(
-                "Hex prefix (bytes startswith)", config.get("bytes_startswith")
+                "Hex prefix (bytes startswith)",
+                config.get("bytes_startswith"),
+                hint="Space-separated lowercase hex bytes that must appear at the start of the token (e.g., 'e2 96').",
             )
             config["bytes_endswith"] = prompt_str(
-                "Hex suffix (bytes endswith)", config.get("bytes_endswith")
+                "Hex suffix (bytes endswith)",
+                config.get("bytes_endswith"),
+                hint="Space-separated lowercase hex bytes that must appear at the end of the token.",
             )
             config["bytes_contains"] = prompt_str(
-                "Hex substring (bytes contains)", config.get("bytes_contains")
+                "Hex substring (bytes contains)",
+                config.get("bytes_contains"),
+                hint="Space-separated lowercase hex bytes that must appear anywhere in the token's byte sequence.",
             )
         elif choice == "6":
-            config["wrap_left"] = prompt_str("Wrap left literal", config.get("wrap_left"))
-            config["wrap_right"] = prompt_str("Wrap right literal", config.get("wrap_right"))
+            config["wrap_left"] = prompt_str(
+                "Wrap left literal",
+                config.get("wrap_left"),
+                hint="Literal text that must precede the inner content (e.g., '<|'). Leave blank to disable wrapper filtering.",
+            )
+            config["wrap_right"] = prompt_str(
+                "Wrap right literal",
+                config.get("wrap_right"),
+                hint="Literal text that must follow the inner content (e.g., '|>').",
+            )
             config["wrap_inner_regex"] = prompt_str(
-                "Inner wrap regex", config.get("wrap_inner_regex")
+                "Inner wrap regex",
+                config.get("wrap_inner_regex"),
+                hint="Optional regex describing the allowed inner content between left/right wrappers. Default matches any text lazily.",
             )
             config["wrap_greedy"] = prompt_bool(
                 "Use greedy inner wrap match?",
                 bool(config.get("wrap_greedy", False)),
+                hint="Greedy matching spans the longest possible inner content; default non-greedy finds the shortest.",
             )
         elif choice == "7":
             config["repeat_nonword_min"] = prompt_int(
                 "Min consecutive non-word characters",
                 config.get("repeat_nonword_min"),
+                hint="Minimum run length of non-alphanumeric/underscore/space characters to match; leave blank to ignore this filter.",
             )
             config["repeat_chars"] = prompt_str(
-                "Character set for repetition", config.get("repeat_chars")
+                "Character set for repetition",
+                config.get("repeat_chars"),
+                hint="Literal characters considered for repetition (e.g., '<|-'). Leave blank to disable custom set filtering.",
             )
             if config["repeat_chars"]:
-                repeat_min = prompt_int("Minimum run length", config.get("repeat_min", 2))
+                repeat_min = prompt_int(
+                    "Minimum run length",
+                    config.get("repeat_min", 2),
+                    hint="Shortest allowed run of the specified characters. Default is 2.",
+                )
                 config["repeat_min"] = repeat_min if repeat_min is not None else 2
             else:
                 config["repeat_min"] = 2
         elif choice == "8":
-            config["limit"] = prompt_int("Row limit", config.get("limit"))
+            config["limit"] = prompt_int(
+                "Row limit",
+                config.get("limit"),
+                hint="Maximum number of rows to display or export. Leave blank for all matching tokens.",
+            )
             config["sort_by"] = prompt_sort_by(config.get("sort_by", "id"))
-            config["desc"] = prompt_bool("Sort descending?", bool(config.get("desc", False)))
+            config["desc"] = prompt_bool(
+                "Sort descending?",
+                bool(config.get("desc", False)),
+                hint="Use descending order instead of ascending when sorting results.",
+            )
             config["show_bytes"] = prompt_bool(
-                "Include bytes column?", bool(config.get("show_bytes", False))
+                "Include bytes column?",
+                bool(config.get("show_bytes", False)),
+                hint="Adds a column showing each token's raw bytes rendered in hex.",
             )
             config["show_repr"] = prompt_bool(
-                "Include repr column?", bool(config.get("show_repr", False))
+                "Include repr column?",
+                bool(config.get("show_repr", False)),
+                hint="Adds a column with Python-style escaped representation of the decoded token.",
             )
-            config["csv"] = prompt_str("CSV output path", config.get("csv"))
-            config["json"] = prompt_bool("Output JSON array?", bool(config.get("json", False)))
+            config["csv"] = prompt_str(
+                "CSV output path",
+                config.get("csv"),
+                hint="Write results to this path as a CSV file. Leave blank to skip file output.",
+            )
+            config["json"] = prompt_bool(
+                "Output JSON array?",
+                bool(config.get("json", False)),
+                hint="Print the rows as a JSON array to stdout instead of the table.",
+            )
             if config["json"]:
                 config["pretty"] = prompt_bool(
-                    "Pretty print JSON?", bool(config.get("pretty", False))
+                    "Pretty print JSON?",
+                    bool(config.get("pretty", False)),
+                    hint="Adds indentation to the JSON array for readability.",
                 )
                 config["jsonl"] = False
             else:
                 config["jsonl"] = prompt_bool(
-                    "Output JSON Lines?", bool(config.get("jsonl", False))
+                    "Output JSON Lines?",
+                    bool(config.get("jsonl", False)),
+                    hint="Emits one JSON object per line to stdout.",
                 )
                 if not config["jsonl"]:
                     config["pretty"] = bool(config.get("pretty", False))
             config["no_header"] = prompt_bool(
-                "Skip header row?", bool(config.get("no_header", False))
+                "Skip header row?",
+                bool(config.get("no_header", False)),
+                hint="Omit the header row when printing the tabular output.",
             )
         elif choice == "9":
             run_args = dict(config)
