@@ -202,8 +202,13 @@ def collect_rows(args: argparse.Namespace) -> List[Dict[str, object]]:
         repeat_chars_re = re.compile(rf"{cls}{{{args.repeat_min},}}")
 
     include_special = args.include_special or args.special_only
+    token_id_filter = set(args.token_ids) if args.token_ids else None
+    if token_id_filter is not None:
+        include_special = True
     rows: List[Dict[str, object]] = []
     for token_id, token_bytes in iter_vocab(encoding_name, include_special, args.special_only):
+        if token_id_filter is not None and token_id not in token_id_filter:
+            continue
         try:
             token_str = token_bytes.decode("utf-8", errors=args.decode_errors)
         except Exception:
@@ -346,6 +351,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--min-id", type=int, help="Minimum token id.")
     p.add_argument("--max-id", type=int, help="Maximum token id.")
+    p.add_argument(
+        "--token-id",
+        dest="token_ids",
+        type=int,
+        action="append",
+        help="Filter to specific token id (repeat for multiple ids).",
+    )
 
     # Decoding / printable
     p.add_argument(
@@ -426,6 +438,32 @@ def prompt_int(prompt: str, current: int | None, *, hint: str | None = None) -> 
             return int(raw)
         except ValueError:
             print("Please enter an integer.")
+
+
+def prompt_int_list(
+    prompt: str, current: List[int] | None, *, hint: str | None = None
+) -> List[int] | None:
+    display = ", ".join(str(x) for x in current) if current else None
+    while True:
+        default = f" [{display}]" if display else " [none]"
+        message = f"{prompt}{default}"
+        if hint:
+            message += f"\n  Hint: {hint}"
+        raw = input(f"{message}\n  Enter to keep current, '-' to clear: ").strip()
+        if not raw:
+            return current
+        if raw == "-":
+            return None
+        parts = [part for part in re.split(r"[,\s]+", raw) if part]
+        try:
+            values = [int(part) for part in parts]
+        except ValueError:
+            print("Please enter integers separated by commas or spaces.")
+            continue
+        if not values:
+            print("Please enter at least one integer or '-' to clear.")
+            continue
+        return values
 
 
 def prompt_bool(prompt: str, current: bool, *, hint: str | None = None) -> bool:
@@ -905,7 +943,7 @@ def run_interactive(
             f" Printable only: {bool_label(bool(config.get('printable', False)))} | Allow whitespace: {bool_label(bool(config.get('allow_whitespace', False)))} | Decode errors: {config.get('decode_errors', 'replace')}"
         )
         print(
-            f" Length range: {config.get('min_len') or '-'} to {config.get('max_len') or '-'} ({config.get('length_by', 'chars')}) | ID range: {config.get('min_id') or '-'} to {config.get('max_id') or '-'}"
+            f" Length range: {config.get('min_len') or '-'} to {config.get('max_len') or '-'} ({config.get('length_by', 'chars')}) | ID range: {config.get('min_id') or '-'} to {config.get('max_id') or '-'} | Token IDs: {', '.join(str(x) for x in config.get('token_ids') or []) or '-'}"
         )
         print(
             f" Output: sort by {config.get('sort_by', 'id')} ({'desc' if config.get('desc') else 'asc'}), limit {config.get('limit') or '-'}"
@@ -1018,6 +1056,11 @@ def run_interactive(
                 "Maximum token ID",
                 config.get("max_id"),
                 hint="Largest token id to include. Leave blank for no upper bound.",
+            )
+            config["token_ids"] = prompt_int_list(
+                "Specific token IDs",
+                config.get("token_ids"),
+                hint="Comma or space separated ids (e.g., 199999, 200000). Overrides range filters to include only listed tokens.",
             )
         elif choice == "5":
             config["bytes_startswith"] = prompt_str(
