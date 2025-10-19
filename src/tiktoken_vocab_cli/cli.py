@@ -486,6 +486,7 @@ class MenuOption(NamedTuple):
     label: str
     hotkey: str | None = None
     hint: str | None = None
+    aliases: Tuple[str, ...] = ()
 
 
 def _supports_key_capture() -> bool:
@@ -589,6 +590,8 @@ def _match_option_by_key(key: str, options: List[MenuOption]) -> int | None:
         candidates = [opt.value.lower()]
         if opt.hotkey:
             candidates.append(opt.hotkey.lower())
+        if opt.aliases:
+            candidates.extend(alias.lower() for alias in opt.aliases)
         if lowered in candidates:
             return idx
     return None
@@ -607,8 +610,13 @@ def _render_interactive_menu(
         lines.append(instructions)
     for idx, opt in enumerate(options):
         pointer = ">" if idx == highlight_idx else " "
-        hotkey = f"[{opt.hotkey}] " if opt.hotkey else ""
-        lines.append(f"{pointer} {hotkey}{opt.label}")
+        keys: List[str] = []
+        if opt.hotkey:
+            keys.append(opt.hotkey)
+        if opt.aliases:
+            keys.extend(opt.aliases)
+        key_label = f"[{'/'.join(keys)}] " if keys else ""
+        lines.append(f"{pointer} {key_label}{opt.label}")
         if show_hints and idx == highlight_idx and opt.hint:
             lines.append(f"    {opt.hint}")
 
@@ -648,7 +656,12 @@ def select_menu_option(
         if instructions:
             print(instructions)
         for opt in options:
-            hotkey = f"[{opt.hotkey}] " if opt.hotkey else ""
+            keys: List[str] = []
+            if opt.hotkey:
+                keys.append(opt.hotkey)
+            if opt.aliases:
+                keys.extend(opt.aliases)
+            hotkey = f"[{'/'.join(keys)}] " if keys else ""
             print(f"  {hotkey}{opt.label}")
         while True:
             raw = input("Choice: ").strip()
@@ -770,7 +783,13 @@ def run_interactive(
         MenuOption(
             "0", "Reset all settings to defaults", "0", "Restore parser defaults from argparse."
         ),
-        MenuOption("x", "Exit interactive mode", "x", "Close the menu and return to the shell."),
+        MenuOption(
+            "x",
+            "Exit interactive mode",
+            "x",
+            "Close the menu and return to the shell.",
+            ("q",),
+        ),
     ]
     selected_choice = "1"
 
