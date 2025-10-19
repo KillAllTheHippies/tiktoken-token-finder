@@ -2,7 +2,6 @@ import argparse
 import csv
 import json
 import re
-import select
 import sys
 from typing import Dict, Iterable, List, NamedTuple, Tuple
 
@@ -500,16 +499,22 @@ def _read_keypress() -> str | None:
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            try:
-                if select.select([sys.stdin], [], [], 0.02)[0]:
-                    ch += sys.stdin.read(1)
-                    if select.select([sys.stdin], [], [], 0.002)[0]:
-                        ch += sys.stdin.read(1)
-            except (OSError, ValueError):
-                pass
-        return ch
+        raw_attrs = termios.tcgetattr(fd)
+        raw_attrs[6][termios.VMIN] = 0
+        raw_attrs[6][termios.VTIME] = 1  # 100ms timeout for additional bytes
+        termios.tcsetattr(fd, termios.TCSANOW, raw_attrs)
+
+        buffer: List[str] = []
+        while True:
+            ch = sys.stdin.read(1)
+            if not ch:
+                break
+            buffer.append(ch)
+            if buffer[0] != "\x1b":
+                break
+            if ch.isalpha() or ch in "~^$":
+                break
+        return "".join(buffer)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
@@ -539,7 +544,29 @@ def _normalize_keypress(raw: str) -> str:
         "\x7f": "BACKSPACE",
         "\x1b": "ESC",
     }
-    return mapping.get(raw, raw)
+    if raw in mapping:
+        return mapping[raw]
+    if raw.startswith("\x1b["):
+        core = raw[2:]
+        if core.endswith("A"):
+            return "UP"
+        if core.endswith("B"):
+            return "DOWN"
+        if core.endswith("C"):
+            return "RIGHT"
+        if core.endswith("D"):
+            return "LEFT"
+    if raw.startswith("\x1bO"):
+        suffix = raw[-1]
+        if suffix == "A":
+            return "UP"
+        if suffix == "B":
+            return "DOWN"
+        if suffix == "C":
+            return "RIGHT"
+        if suffix == "D":
+            return "LEFT"
+    return raw
 
 
 def _match_option_by_key(key: str, options: List[MenuOption]) -> int | None:
