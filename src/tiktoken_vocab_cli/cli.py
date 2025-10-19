@@ -80,6 +80,69 @@ def char_class_from_literals(chars: str) -> str:
     return f"[{escaped}]"
 
 
+def encoding_name_for_model(model: str | None) -> str | None:
+    if not model:
+        return None
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except KeyError:
+        return None
+    return enc.name
+
+
+TOKEN_ID_RANGE_RE = re.compile(r"^(-?\d+)\s*-\s*(-?\d+)$")
+TOKEN_ID_SPLIT_RE = re.compile(r"[,\s]+")
+
+
+def expand_token_id_terms(parts: Iterable[str]) -> List[int]:
+    values: List[int] = []
+    for part in parts:
+        term = part.strip()
+        if not term:
+            continue
+        range_match = TOKEN_ID_RANGE_RE.fullmatch(term)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2))
+            if start > end:
+                raise ValueError(f"Token ID range start must be <= end: '{term}'")
+            values.extend(range(start, end + 1))
+            continue
+        try:
+            values.append(int(term))
+        except ValueError as exc:
+            raise ValueError(f"Invalid token ID value: '{term}'") from exc
+    return values
+
+
+def parse_token_id_expression(expr: str) -> List[int]:
+    parts = [segment for segment in TOKEN_ID_SPLIT_RE.split(expr.strip()) if segment]
+    if not parts:
+        raise ValueError("Provide one or more token IDs or ranges (e.g., '42' or '10-20').")
+    return expand_token_id_terms(parts)
+
+
+def normalize_token_ids(args: argparse.Namespace) -> None:
+    raw = getattr(args, "token_ids", None)
+    if not raw:
+        args.token_ids = None
+        return
+    normalized: List[int] = []
+    try:
+        for item in raw:
+            if isinstance(item, int):
+                normalized.append(item)
+            elif isinstance(item, str):
+                normalized.extend(parse_token_id_expression(item))
+            elif item is None:
+                continue
+            else:
+                normalized.append(int(item))
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    args.token_ids = normalized or None
+
+
 def build_wrap_pattern(
     left: str, right: str, inner_regex: str | None, ignore_case: bool, greedy: bool
 ) -> re.Pattern:
@@ -272,6 +335,7 @@ def output_results(args: argparse.Namespace, rows: List[Dict[str, object]]) -> N
 
 
 def run_cli(args: argparse.Namespace) -> None:
+    normalize_token_ids(args)
     if getattr(args, "special_only", False):
         args.include_special = True
     rows = collect_rows(args)
@@ -354,9 +418,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--token-id",
         dest="token_ids",
-        type=int,
         action="append",
-        help="Filter to specific token id (repeat for multiple ids).",
+        help="Filter to specific token ids or ranges (repeat, e.g., '--token-id 42 --token-id 100-120').",
     )
 
     # Decoding / printable
@@ -454,14 +517,10 @@ def prompt_int_list(
             return current
         if raw == "-":
             return None
-        parts = [part for part in re.split(r"[,\s]+", raw) if part]
         try:
-            values = [int(part) for part in parts]
-        except ValueError:
-            print("Please enter integers separated by commas or spaces.")
-            continue
-        if not values:
-            print("Please enter at least one integer or '-' to clear.")
+            values = parse_token_id_expression(raw)
+        except ValueError as exc:
+            print(str(exc))
             continue
         return values
 
@@ -927,10 +986,22 @@ def run_interactive(
 
     while True:
         print("\n=== TikToken Vocabulary Explorer ===")
+        model_name = config.get("model")
+        encoding_value = config.get("encoding")
+        encoding_label = encoding_value or "auto"
+        if model_name:
+            default_encoding = encoding_name_for_model(model_name)
+            if default_encoding:
+                if encoding_value == default_encoding:
+                    encoding_label = f"{encoding_label} (auto from model)"
+                else:
+                    encoding_label = f"{encoding_label} (model default: {default_encoding})"
+            else:
+                encoding_label = f"{encoding_label} (model not in tiktoken catalog)"
         print(
             " Model: {model} | Encoding: {encoding} | Include special: {include_special} | Special only: {special_only}".format(
-                model=config.get("model") or "-",
-                encoding=config.get("encoding") or "auto",
+                model=model_name or "-",
+                encoding=encoding_label,
                 include_special=bool_label(bool(config.get("include_special", False))),
                 special_only=bool_label(bool(config.get("special_only", False))),
             )
@@ -963,17 +1034,33 @@ def run_interactive(
         selected_choice = choice
 
         if choice == "1":
-            config["model"] = choose_from_catalog(
+            previous_encoding = config.get("encoding")
+            model_choice = choose_from_catalog(
                 "Select a model (default: none — encoding determines behaviour):",
                 available_model_names(),
                 config.get("model"),
                 hint="Model presets map to known OpenAI models and automatically choose an encoding.",
             )
+            config["model"] = model_choice
+            if model_choice:
+                resolved = encoding_name_for_model(model_choice)
+                if resolved:
+                    config["encoding"] = resolved
+                    if resolved != previous_encoding:
+                        print(
+                            f"Model '{model_choice}' uses encoding '{resolved}'. Encoding updated automatically."
+                        )
+                    else:
+                        print(f"Model '{model_choice}' uses encoding '{resolved}'.")
+                else:
+                    print(
+                        f"Model '{model_choice}' is not in tiktoken's catalog; encoding stays {previous_encoding or 'auto'}."
+                    )
             config["encoding"] = choose_from_catalog(
                 "Select an encoding (default: cl100k_base unless a model overrides it):",
                 available_encoding_names(),
                 config.get("encoding"),
-                hint="Encodings define the base vocabulary (e.g., cl100k_base, gpt2).",
+                hint="Encodings define the base vocabulary (e.g., cl100k_base, gpt2). When a model is known, the matching encoding is pre-selected automatically.",
             )
             include_special = prompt_bool(
                 "Include special tokens? (default: no)",
@@ -1060,7 +1147,7 @@ def run_interactive(
             config["token_ids"] = prompt_int_list(
                 "Specific token IDs",
                 config.get("token_ids"),
-                hint="Comma or space separated ids (e.g., 199999, 200000). Overrides range filters to include only listed tokens.",
+                hint="Comma or space separated ids or ranges (e.g., 199999, 200000-200010). Overrides range filters to include only listed tokens.",
             )
         elif choice == "5":
             config["bytes_startswith"] = prompt_str(
