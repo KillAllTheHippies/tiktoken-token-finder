@@ -446,6 +446,7 @@ def prompt_length_by(current: str) -> str:
         f"Length basis (current: {default})",
         options,
         default_value=default,
+        instructions="Default measurement counts decoded characters.",
     )
 
 
@@ -460,6 +461,7 @@ def prompt_sort_by(current: str) -> str:
         f"Sort key (current: {default})",
         options,
         default_value=default,
+        instructions="Default ordering sorts by token id ascending.",
     )
 
 
@@ -474,6 +476,7 @@ def prompt_decode_errors(current: str) -> str:
         f"Decode error handling (current: {default})",
         options,
         default_value=default,
+        instructions="Default strategy replaces undecodable bytes with the replacement character.",
     )
 
 
@@ -500,9 +503,24 @@ def choose_from_catalog(prompt: str, values: List[str], current: str | None) -> 
         return prompt_str(prompt, current)
 
     extras = [
-        MenuOption("__custom__", "Enter a custom value", "c"),
-        MenuOption("__clear__", "Clear value", "-", "Remove the current value."),
-        MenuOption("__back__", "Back (keep current)", "b"),
+        MenuOption(
+            "__custom__",
+            "Enter a custom value",
+            "c",
+            "Type any model/encoding name supported by your tiktoken install.",
+        ),
+        MenuOption(
+            "__clear__",
+            "Clear value",
+            "-",
+            "Remove the current value so the CLI falls back to its default behaviour.",
+        ),
+        MenuOption(
+            "__back__",
+            "Back (keep current)",
+            "b",
+            "Leave this setting unchanged and return to the main menu.",
+        ),
     ]
     options = extras + [MenuOption(v, v) for v in values]
 
@@ -792,32 +810,49 @@ def run_interactive(
             "1",
             "Configure model & encoding",
             "1",
-            "Set model/encoding and control special token visibility.",
+            "Select tokenizer model or encoding (defaults: no model, encoding auto→cl100k_base, specials excluded).",
         ),
         MenuOption(
-            "2", "Configure text filters", "2", "Apply regex, prefix/suffix, and substring filters."
+            "2",
+            "Configure text filters",
+            "2",
+            "Enable regex, prefix/suffix, or contains filters (all off by default).",
         ),
         MenuOption(
             "3",
             "Configure printable & decoding options",
             "3",
-            "Control printable filter and decode behaviour.",
-        ),
-        MenuOption("4", "Configure length & ID filters", "4", "Limit token length or id ranges."),
-        MenuOption(
-            "5", "Configure byte-level filters", "5", "Filter based on the hex representation."
+            "Toggle printable filtering (default off) and UTF-8 error handling (default replace).",
         ),
         MenuOption(
-            "6", "Configure wrapping filters", "6", "Match tokens enclosed by literal wrappers."
+            "4",
+            "Configure length & ID filters",
+            "4",
+            "Restrict by token length (default unlimited) or id range (default full vocab).",
+        ),
+        MenuOption(
+            "5",
+            "Configure byte-level filters",
+            "5",
+            "Match on token bytes in hex (defaults: no byte filters).",
+        ),
+        MenuOption(
+            "6",
+            "Configure wrapping filters",
+            "6",
+            "Find tokens wrapped by literal delimiters (defaults unset).",
         ),
         MenuOption(
             "7",
             "Configure repetition filters",
             "7",
-            "Match repeated characters or non-word sequences.",
+            "Match repeated characters or symbols (defaults off, repeat length ≥2).",
         ),
         MenuOption(
-            "8", "Configure output options", "8", "Adjust limit, sorting, and output formats."
+            "8",
+            "Configure output options",
+            "8",
+            "Control row limit (default unlimited), sort (default id asc), and output formats (default table).",
         ),
         MenuOption(
             "9", "Run query with current settings", "9", "Execute the query and show results."
@@ -858,6 +893,12 @@ def run_interactive(
         print(
             f" Output: sort by {config.get('sort_by', 'id')} ({'desc' if config.get('desc') else 'asc'}), limit {config.get('limit') or '-'}"
         )
+        print(
+            " Defaults → Model empty uses encoding auto-detect; encoding falls back to cl100k_base; special tokens excluded."
+        )
+        print(
+            " Filters are off unless configured; lengths and ids unrestricted; output is tabular sorted by id ascending with no row limit."
+        )
 
         choice = select_menu_option(
             "Choose an action:",
@@ -868,22 +909,23 @@ def run_interactive(
 
         if choice == "1":
             config["model"] = choose_from_catalog(
-                "Select a model (or choose an action):",
+                "Select a model (default: none — encoding determines behaviour):",
                 available_model_names(),
                 config.get("model"),
             )
             config["encoding"] = choose_from_catalog(
-                "Select an encoding (or choose an action):",
+                "Select an encoding (default: cl100k_base unless a model overrides it):",
                 available_encoding_names(),
                 config.get("encoding"),
             )
             include_special = prompt_bool(
-                "Include special tokens?", bool(config.get("include_special", False))
+                "Include special tokens? (default: no)",
+                bool(config.get("include_special", False)),
             )
             config["include_special"] = include_special
             if include_special:
                 config["special_only"] = prompt_bool(
-                    "Show only special tokens?",
+                    "Show only special tokens? (default: no)",
                     bool(config.get("special_only", False)),
                 )
             else:
