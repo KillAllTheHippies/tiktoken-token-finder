@@ -29,14 +29,20 @@ def resolve_encoding_name(model: str | None, encoding: str | None) -> str:
     return encoding or "cl100k_base"
 
 
-def iter_vocab(encoding_name: str, include_special: bool) -> Iterable[Tuple[int, bytes]]:
+def iter_vocab(
+    encoding_name: str, include_special: bool, special_only: bool
+) -> Iterable[Tuple[int, bytes]]:
     enc = tiktoken.get_encoding(encoding_name)
-    items = list(enc._mergeable_ranks.items())  # type: ignore[attr-defined]
+    if special_only:
+        for token, idx in enc._special_tokens.items():  # type: ignore[attr-defined]
+            yield idx, token.encode("utf-8", "replace")
+        return
+
+    for token_bytes, idx in enc._mergeable_ranks.items():  # type: ignore[attr-defined]
+        yield idx, token_bytes
     if include_special:
-        for s, i in enc._special_tokens.items():  # type: ignore[attr-defined]
-            items.append((s.encode("utf-8", "replace"), i))
-    for b, i in items:
-        yield i, b
+        for token, idx in enc._special_tokens.items():  # type: ignore[attr-defined]
+            yield idx, token.encode("utf-8", "replace")
 
 
 def is_printable(s: str, allow_whitespace: bool) -> bool:
@@ -195,8 +201,9 @@ def collect_rows(args: argparse.Namespace) -> List[Dict[str, object]]:
         cls = char_class_from_literals(args.repeat_chars)
         repeat_chars_re = re.compile(rf"{cls}{{{args.repeat_min},}}")
 
+    include_special = args.include_special or args.special_only
     rows: List[Dict[str, object]] = []
-    for token_id, token_bytes in iter_vocab(encoding_name, args.include_special):
+    for token_id, token_bytes in iter_vocab(encoding_name, include_special, args.special_only):
         try:
             token_str = token_bytes.decode("utf-8", errors=args.decode_errors)
         except Exception:
@@ -260,6 +267,8 @@ def output_results(args: argparse.Namespace, rows: List[Dict[str, object]]) -> N
 
 
 def run_cli(args: argparse.Namespace) -> None:
+    if getattr(args, "special_only", False):
+        args.include_special = True
     rows = collect_rows(args)
     output_results(args, rows)
 
@@ -277,6 +286,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--include-special", action="store_true", help="Include special tokens in results."
+    )
+    p.add_argument(
+        "--special-only",
+        action="store_true",
+        help="Only show special tokens (implies --include-special).",
     )
 
     # Text filters
@@ -720,7 +734,10 @@ def run_interactive(
 
     menu_options = [
         MenuOption(
-            "1", "Configure model & encoding", "1", "Set model/encoding and toggle special tokens."
+            "1",
+            "Configure model & encoding",
+            "1",
+            "Set model/encoding and control special token visibility.",
         ),
         MenuOption(
             "2", "Configure text filters", "2", "Apply regex, prefix/suffix, and substring filters."
@@ -760,7 +777,12 @@ def run_interactive(
     while True:
         print("\n=== TikToken Vocabulary Explorer ===")
         print(
-            f" Model: {config.get('model') or '-'} | Encoding: {config.get('encoding') or 'auto'} | Include special: {bool_label(bool(config.get('include_special', False)))}"
+            " Model: {model} | Encoding: {encoding} | Include special: {include_special} | Special only: {special_only}".format(
+                model=config.get("model") or "-",
+                encoding=config.get("encoding") or "auto",
+                include_special=bool_label(bool(config.get("include_special", False))),
+                special_only=bool_label(bool(config.get("special_only", False))),
+            )
         )
         regex_desc = config.get("regex") or "-"
         print(
@@ -786,9 +808,17 @@ def run_interactive(
         if choice == "1":
             config["model"] = prompt_str("Model name", config.get("model"))
             config["encoding"] = prompt_str("Encoding name", config.get("encoding"))
-            config["include_special"] = prompt_bool(
+            include_special = prompt_bool(
                 "Include special tokens?", bool(config.get("include_special", False))
             )
+            config["include_special"] = include_special
+            if include_special:
+                config["special_only"] = prompt_bool(
+                    "Show only special tokens?",
+                    bool(config.get("special_only", False)),
+                )
+            else:
+                config["special_only"] = False
         elif choice == "2":
             config["regex"] = prompt_str("Regex pattern", config.get("regex"))
             if config.get("regex"):
