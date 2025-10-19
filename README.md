@@ -1,5 +1,5 @@
 
-## tiktoken-vocab-cli
+## tiktoken-token-finder
 
 Command line tooling for exploring OpenAI `tiktoken` vocabularies. The CLI runs either through direct flags or an interactive menu that guides configuration of filters, output formats, and token metadata.
 
