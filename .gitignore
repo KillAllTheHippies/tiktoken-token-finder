@@ -27,6 +27,7 @@ build/
 # Project artifacts
 WARP.md
 tokenizer_output.csv
+AGENTS.md
 
 # Editors/OS
 .idea/
