@@ -955,7 +955,9 @@ def run_interactive(
             config["regex"] = prompt_str(
                 "Regex pattern",
                 config.get("regex"),
-                hint="Python-style regular expression matched against the decoded token string. Leave blank to disable.",
+                hint=(
+                    "Python regex applied to decoded tokens. Examples: '^the' (prefix), 'cat$' (suffix), '\\d{3}' (3 digits), '\\w+' (word)."
+                ),
             )
             if config.get("regex"):
                 config["ignore_case"] = prompt_bool(
