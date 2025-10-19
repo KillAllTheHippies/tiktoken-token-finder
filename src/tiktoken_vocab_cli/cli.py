@@ -956,7 +956,7 @@ def run_interactive(
                 "Regex pattern",
                 config.get("regex"),
                 hint=(
-                    "Python regex applied to decoded tokens. Examples: '^the' (prefix), 'cat$' (suffix), '\\d{3}' (3 digits), '\\w+' (word)."
+                    "Python regex on decoded tokens. Snippets: '^the' anchor start, 'cat$' anchor end, '\\d{3}' digits, '\\w+' word, '\\s+' whitespace, '(foo|bar)' alt, '(?i)case' ignore case, '(?<=pre)fix' lookbehind, '(?=suf)' lookahead, '\\bword\\b' boundary, '[^abc]' neg class."
                 ),
             )
             if config.get("regex"):
